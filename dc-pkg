@@ -1,0 +1,163 @@
+#!/bin/bash
+set -e
+
+# ========================
+# Configuración
+# ========================
+PREFIX="$HOME/.devcore"
+REPO="/usr/dcpkg/devcore/repo"
+BUILD="/usr/dcpkg/devcore/build"
+DB="$PREFIX/installed"
+
+cmd="$1"
+pkg="$2"
+
+# ========================
+# Utilidades
+# ========================
+die() {
+  echo "❌ $1" >&2
+  exit 1
+}
+
+require() {
+  command -v "$1" >/dev/null || die "Falta dependencia: $1"
+}
+
+# ========================
+# Dependencias mínimas
+# ========================
+require curl
+require tar
+require file
+require sed
+
+mkdir -p "$BUILD" "$PREFIX/bin" "$PREFIX/share" "$DB"
+
+# ========================
+# Instalación
+# ========================
+install_pkg() {
+  [[ -n "$pkg" ]] || die "Debes indicar un paquete"
+
+  local dc="$REPO/$pkg.dc"
+  [[ -f "$dc" ]] || die "No existe el paquete $pkg"
+
+  # cargar metadata
+  source "$dc"
+
+  echo "→ Instalando $name"
+
+  # preparar build
+  rm -rf "$BUILD/$name"
+  mkdir -p "$BUILD/$name"
+  cd "$BUILD/$name"
+
+  # ------------------------
+  # Descargar fuente
+  # ------------------------
+  echo "→ Descargando fuente"
+  curl -L --progress-bar "$source" -o source.tar.gz \
+    || die "Falló la descarga"
+
+  file source.tar.gz | grep -q 'gzip compressed' \
+    || die "El archivo descargado no es gzip"
+
+  #tar xzf source.tar.gz --strip-components=1
+  tar --no-same-owner --no-same-permissions \
+    -xzf source.tar.gz \
+    --strip-components=1
+
+
+  # ------------------------
+  # Compilación (si aplica)
+  # ------------------------
+  if [[ "$type" == "compiled" ]]; then
+    [[ -n "$build" ]] || die "Paquete compilado sin build="
+    echo "→ Compilando $name"
+    eval "$build" || die "Falló la compilación"
+  fi
+
+  [[ -f "$bin" ]] || die "No se encontró el ejecutable $bin"
+
+  # ------------------------
+  # Shebang Perl
+  # ------------------------
+  if head -n 1 "$bin" | grep -q '^#%BANGPERL%'; then
+    sed -i '1c #!/usr/bin/env perl' "$bin"
+  fi
+
+  # ------------------------
+  # Instalar binario real
+  # ------------------------
+  install -m 755 "$bin" "$PREFIX/bin/$bin.real"
+
+  # ------------------------
+  # Wrapper (env controlado)
+  # ------------------------
+  cat > "$PREFIX/bin/$bin" << EOF
+#!/bin/sh
+export COWPATH="$PREFIX/share/cowsay/cows"
+exec "$PREFIX/bin/$bin.real" "\$@"
+EOF
+
+  chmod +x "$PREFIX/bin/$bin"
+
+  # ------------------------
+  # Instalar datos
+  # ------------------------
+  if [[ -n "$data" && -d "$data" ]]; then
+    target="$PREFIX/share/${datadir:-$name}"
+    echo "→ Instalando datos en $target"
+    mkdir -p "$target"
+    cp -r "$data"/* "$target/"
+  fi
+
+  echo "$name $version" > "$DB/$name"
+
+  echo "✔ $name instalado correctamente"
+}
+
+# ========================
+# Eliminación
+# ========================
+remove_pkg() {
+  [[ -n "$pkg" ]] || die "Debes indicar un paquete"
+
+  local entry="$DB/$pkg"
+  [[ -f "$entry" ]] || die "El paquete $pkg no está instalado"
+
+  source "$REPO/$pkg.dc"
+
+  echo "→ Eliminando $pkg"
+
+  rm -f "$PREFIX/bin/$bin" "$PREFIX/bin/$bin.real"
+  rm -rf "$PREFIX/share/$pkg"
+  rm -f "$entry"
+
+  echo "✔ $pkg eliminado"
+}
+
+# ========================
+# Listado
+# ========================
+list_pkgs() {
+  echo "Paquetes instalados:"
+  ls "$DB" 2>/dev/null || echo "(ninguno)"
+}
+
+# ========================
+# MAIN
+# ========================
+case "$cmd" in
+  install) install_pkg ;;
+  remove)  remove_pkg ;;
+  list)    list_pkgs ;;
+  *)
+    echo "Uso:"
+    echo "  dc-pkg install <paquete>"
+    echo "  dc-pkg remove  <paquete>"
+    echo "  dc-pkg list"
+    ;;
+esac
+

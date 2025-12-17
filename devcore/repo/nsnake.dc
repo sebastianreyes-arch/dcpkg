@@ -1,0 +1,7 @@
+# Paquete: nsnake
+name=nsnake
+version=5.0
+source=https://github.com/alexdantas/nSnake/archive/refs/heads/master.tar.gz
+type=compiled
+bin=nsnake
+build="make"

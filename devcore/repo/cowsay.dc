@@ -1,0 +1,10 @@
+# cowsay.dc - Definición del paquete
+
+name=cowsay
+version=3.7
+source=https://github.com/tnalpgge/rank-amateur-cowsay/archive/refs/heads/master.tar.gz
+type=script
+bin=cowsay
+data=cows
+datadir=cowsay/cows
+

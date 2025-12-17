@@ -1,0 +1,5 @@
+name=lolcat
+version=1.4
+source=https://github.com/busyloop/lolcat/archive/refs/heads/master.tar.gz
+type=script
+bin=lolcat
