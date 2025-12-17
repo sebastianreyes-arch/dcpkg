@@ -1,0 +1,52 @@
+#!/bin/bash
+set -e
+
+REPO_DIR="/usr/dcpkg"
+BIN_PATH="/usr/bin/dc-pkg"
+
+error() {
+  echo "❌ Error: $1" >&2
+  exit 1
+}
+
+info() {
+  echo "→ $1"
+}
+
+# -------------------------
+# Comprobaciones básicas
+# -------------------------
+[[ $EUID -eq 0 ]] || error "Debes ejecutar esto como root"
+
+[[ -d "$REPO_DIR/.git" ]] || error "$REPO_DIR no es un repositorio git válido"
+
+command -v git >/dev/null || error "git no está instalado"
+
+# -------------------------
+# Actualizar repo
+# -------------------------
+info "Actualizando repositorio dc-pkg"
+cd "$REPO_DIR"
+
+if ! git pull --rebase; then
+  error "git pull falló"
+fi
+
+# -------------------------
+# Verificar nuevo dc-pkg
+# -------------------------
+[[ -f "$REPO_DIR/dc-pkg" ]] || error "El archivo dc-pkg no existe en el repo"
+
+# -------------------------
+# Instalar nuevo dc-pkg
+# -------------------------
+info "Instalando nueva versión de dc-pkg"
+
+rm -f "$BIN_PATH"
+cp "$REPO_DIR/dc-pkg" "$BIN_PATH"
+chmod +x "$BIN_PATH"
+
+# -------------------------
+# Final
+# -------------------------
+info "dc-pkg se actualizó correctamente ✅"

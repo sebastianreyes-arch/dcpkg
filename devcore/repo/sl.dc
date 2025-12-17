@@ -4,3 +4,4 @@ source=https://github.com/mtoyoda/sl/archive/refs/heads/master.tar.gz
 type=compiled
 bin=sl
 build="make"
+depends="gcc make ncurses-devel"

@@ -7,4 +7,5 @@ type=script
 bin=cowsay
 data=cows
 datadir=cowsay/cows
+depends="perl"
 

@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-# ========================
-# Configuración
-# ========================
+# ==================================================
+# Configuración base
+# ==================================================
 PREFIX="/usr/bin/.devcore"
 REPO="/usr/dcpkg/devcore/repo"
 BUILD="/usr/dcpkg/devcore/build"
@@ -12,143 +12,177 @@ DB="$PREFIX/installed"
 cmd="$1"
 pkg="$2"
 
-# ========================
+# ==================================================
 # Utilidades
-# ========================
+# ==================================================
 die() {
   echo "❌ $1" >&2
   exit 1
+}
+
+info() {
+  echo "→ $1"
 }
 
 require() {
   command -v "$1" >/dev/null || die "Falta dependencia: $1"
 }
 
-# ========================
-# Dependencias mínimas
-# ========================
+# ==================================================
+# Detectar gestor de paquetes del sistema
+# ==================================================
+detect_pm() {
+  if command -v pacman >/dev/null; then
+    PM="pacman"
+    PM_INSTALL="pacman -S --needed --noconfirm"
+  elif command -v apt >/dev/null; then
+    PM="apt"
+    PM_INSTALL="apt install -y"
+  elif command -v xbps-install >/dev/null; then
+    PM="xbps-install"
+    PM_INSTALL="xbps-install -Sy"
+  elif command -v dnf >/dev/null; then
+    PM="dnf"
+    PM_INSTALL="dnf install -y"
+  elif command -v apk >/dev/null; then
+    PM="apk"
+    PM_INSTALL="apk add"
+  else
+    die "No se pudo detectar un gestor de paquetes compatible"
+  fi
+}
+
+detect_pm
+
+# ==================================================
+# Comprobaciones básicas
+# ==================================================
 require curl
 require tar
 require file
 require sed
 
-mkdir -p "$BUILD" "$PREFIX/bin" "$PREFIX/share" "$DB"
+mkdir -p "$BUILD" "$PREFIX/bin" "$PREFIX/share" "$DB" "$REPO"
 
-# ========================
-# Instalación
-# ========================
+# ==================================================
+# Dependencias del sistema
+# ==================================================
+install_sys_deps() {
+  [[ -z "$depends" ]] && return 0
+
+  info "Instalando dependencias del sistema usando $PM: $depends"
+
+  if [[ $EUID -ne 0 ]]; then
+    sudo $PM_INSTALL $depends \
+      || die "Falló la instalación de dependencias"
+  else
+    $PM_INSTALL $depends \
+      || die "Falló la instalación de dependencias"
+  fi
+}
+
+# ==================================================
+# Instalar paquete
+# ==================================================
 install_pkg() {
   [[ -n "$pkg" ]] || die "Debes indicar un paquete"
 
   local dc="$REPO/$pkg.dc"
-  [[ -f "$dc" ]] || die "No existe el paquete $pkg"
+  [[ -f "$dc" ]] || die "No existe $pkg.dc en el repo local"
 
-  # cargar metadata
   source "$dc"
 
-  echo "→ Instalando $name"
+  info "Instalando $name"
 
-  # preparar build
+  if [[ -f "$DB/$name" ]]; then
+    installed_ver=$(cut -d' ' -f2 "$DB/$name")
+    [[ "$installed_ver" == "$version" ]] && die "$name ya está instalado"
+  fi
+
+  install_sys_deps
+
   rm -rf "$BUILD/$name"
   mkdir -p "$BUILD/$name"
   cd "$BUILD/$name"
 
-  # ------------------------
-  # Descargar fuente
-  # ------------------------
-  echo "→ Descargando fuente"
+  info "Descargando fuente"
   curl -L --progress-bar "$source" -o source.tar.gz \
     || die "Falló la descarga"
 
   file source.tar.gz | grep -q 'gzip compressed' \
     || die "El archivo descargado no es gzip"
 
-  #tar xzf source.tar.gz --strip-components=1
-  tar --no-same-owner --no-same-permissions \
-    -xzf source.tar.gz \
-    --strip-components=1
+  tar xzf source.tar.gz --strip-components=1
 
-
-  # ------------------------
-  # Compilación (si aplica)
-  # ------------------------
   if [[ "$type" == "compiled" ]]; then
     [[ -n "$build" ]] || die "Paquete compilado sin build="
-    echo "→ Compilando $name"
+    info "Compilando $name"
     eval "$build" || die "Falló la compilación"
   fi
 
   [[ -f "$bin" ]] || die "No se encontró el ejecutable $bin"
 
-  # ------------------------
-  # Shebang Perl
-  # ------------------------
+  # Corregir shebang Perl
   if head -n 1 "$bin" | grep -q '^#%BANGPERL%'; then
+    info "Corrigiendo shebang de Perl"
     sed -i '1c #!/usr/bin/env perl' "$bin"
   fi
 
-  # ------------------------
   # Instalar binario real
-  # ------------------------
   install -m 755 "$bin" "$PREFIX/bin/$bin.real"
 
-  # ------------------------
-  # Wrapper (env controlado)
-  # ------------------------
+  # Wrapper (env aislado)
   cat > "$PREFIX/bin/$bin" << EOF
 #!/bin/sh
 export COWPATH="$PREFIX/share/cowsay/cows"
 exec "$PREFIX/bin/$bin.real" "\$@"
 EOF
-
   chmod +x "$PREFIX/bin/$bin"
 
-  # ------------------------
-  # Instalar datos
-  # ------------------------
+  # Datos runtime
   if [[ -n "$data" && -d "$data" ]]; then
     target="$PREFIX/share/${datadir:-$name}"
-    echo "→ Instalando datos en $target"
+    info "Instalando datos en $target"
     mkdir -p "$target"
     cp -r "$data"/* "$target/"
   fi
 
   echo "$name $version" > "$DB/$name"
 
-  echo "✔ $name instalado correctamente"
+  info "$name instalado correctamente ✔"
 }
 
-# ========================
-# Eliminación
-# ========================
+# ==================================================
+# Eliminar paquete
+# ==================================================
 remove_pkg() {
   [[ -n "$pkg" ]] || die "Debes indicar un paquete"
 
   local entry="$DB/$pkg"
-  [[ -f "$entry" ]] || die "El paquete $pkg no está instalado"
+  [[ -f "$entry" ]] || die "$pkg no está instalado"
 
   source "$REPO/$pkg.dc"
 
-  echo "→ Eliminando $pkg"
+  info "Eliminando $pkg"
 
   rm -f "$PREFIX/bin/$bin" "$PREFIX/bin/$bin.real"
   rm -rf "$PREFIX/share/$pkg"
   rm -f "$entry"
 
-  echo "✔ $pkg eliminado"
+  info "$pkg eliminado ✔"
 }
 
-# ========================
-# Listado
-# ========================
+# ==================================================
+# Listar paquetes
+# ==================================================
 list_pkgs() {
   echo "Paquetes instalados:"
   ls "$DB" 2>/dev/null || echo "(ninguno)"
 }
 
-# ========================
+# ==================================================
 # MAIN
-# ========================
+# ==================================================
 case "$cmd" in
   install) install_pkg ;;
   remove)  remove_pkg ;;
@@ -156,8 +190,9 @@ case "$cmd" in
   *)
     echo "Uso:"
     echo "  dc-pkg install <paquete>"
-    echo "  dc-pkg remove  <paquete>"
+    echo "  dc-pkg remove <paquete>"
     echo "  dc-pkg list"
     ;;
 esac
+
 
