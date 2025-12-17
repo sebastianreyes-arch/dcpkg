@@ -4,7 +4,7 @@ set -e
 # ========================
 # Configuración
 # ========================
-PREFIX="$HOME/.devcore"
+PREFIX="/usr/bin/.devcore"
 REPO="/usr/dcpkg/devcore/repo"
 BUILD="/usr/dcpkg/devcore/build"
 DB="$PREFIX/installed"
